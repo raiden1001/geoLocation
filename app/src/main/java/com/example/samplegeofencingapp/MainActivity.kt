@@ -10,6 +10,9 @@ import android.app.Dialog
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -25,9 +28,14 @@ import com.google.android.gms.location.GeofencingClient
 import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
 import android.location.Location
+import android.net.Uri
+import android.os.PersistableBundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import androidx.core.view.isVisible
 import com.example.samplegeofencingapp.databinding.CustomProgressBarBinding
+import com.google.android.datatransport.cct.internal.NetworkConnectionInfo
 
 class MainActivity : AppCompatActivity() {
     private lateinit var dialog: Dialog
@@ -51,10 +59,11 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         customProgress = CustomProgressBarBinding.inflate(layoutInflater)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        geofencingClient = LocationServices.getGeofencingClient(this)
+        //geofencingClient = LocationServices.getGeofencingClient(this)
         val view = binding.root
         setContentView(view)
         createNotifyChannel()
+        intitAppCheckForBatteryOpt(this)
         if (checkAndRequestForegroundPermissions() && checkAndRequestBackgroundPermissions()) {
             startGeofencing()
         } else {
@@ -248,6 +257,24 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
+    private fun scheduleGeofenceJob(context: Context, latitude: Double, longitude: Double) {
+        val jobScheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+
+        val extras = PersistableBundle().apply {
+            putDouble("latitude", latitude)
+            putDouble("longitude", longitude)
+            putString("geofenceId", GEOFENCE_ID)
+        }
+
+        val jobInfo = JobInfo.Builder(JOB_ID, ComponentName(context, GeofenceJobService::class.java))
+            //.setRequiredNetworkType(NetworkConnectionInfo.NetworkType.C)
+            .setPersisted(true) // Persist across reboots if needed
+            .setExtras(extras) // Set the extras
+            .build()
+
+        jobScheduler.schedule(jobInfo)
+    }
+
     private fun getCurrentLocation() {
         if (ActivityCompat.checkSelfPermission(
                 this,
@@ -271,7 +298,9 @@ class MainActivity : AppCompatActivity() {
             if (location != null) {
                 customProgress.progressBar.isVisible = false
                 // Create a geofence around the current location with a 200 meter radius
-                createGeofence(location)
+                //createGeofence(location)
+
+                scheduleGeofenceJob(this, location.latitude, location.longitude)
             } else {
                 customProgress.progressBar.isVisible = false
                 Toast.makeText(this, "Current location not available", Toast.LENGTH_SHORT).show()
@@ -291,10 +320,22 @@ class MainActivity : AppCompatActivity() {
         Runtime.getRuntime().exit(0)
     }
 
+    private fun intitAppCheckForBatteryOpt(context: Context){
+        val intent = Intent()
+        val packageName = context.packageName
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            intent.action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+            intent.data = Uri.parse("package:$packageName")
+            startActivity(intent)
+        }
+    }
+
     companion object {
         private const val FOREGROUND_PERMISSIONS_REQUEST_CODE = 100
         private const val BACKGROUND_PERMISSIONS_REQUEST_CODE = 101
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1000
         private const val GEOFENCE_ID = "1001"
+        private const val JOB_ID = 1001
     }
 }
